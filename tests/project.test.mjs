@@ -16,7 +16,7 @@ test('step 3 exposes a guarded narrator-only photo choice screen',()=>{
  assert.match(app,/dd_v4_choose_photo/);
  assert.match(app,/createSignedUrls/);
  assert.match(app,/사진을 고르고 있어요/);
- assert.match(app,/const readyToStart=m&&m.matchType==='solo'&&\['random','select'\]/);
+ assert.match(app,/const readyToStart=m&&\['solo','team'\]\.includes\(m.matchType\)/);
 });
 test('step 3 migration preserves existing data and guards selections',()=>{
  const sql=read('supabase/003_v4_photo_selection.sql');

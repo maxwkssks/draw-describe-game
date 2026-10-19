@@ -1,102 +1,42 @@
-# 그려봐! — 온라인 웹사이트 v3.0
+# 그려봐! v4.0 — 3단계: 사진 출제 및 설명자 직접 선택
 
-**사용자 설치 불필요.** Vercel에서 정적 웹사이트를 호스팅하고 Supabase Auth / PostgreSQL / Storage로 실제 멀티플레이를 운영합니다. Discord는 음성 설명 용도로 따로 사용합니다.
+이 파일은 **기존 운영 중인 Vercel + GitHub + Supabase 웹사이트의 업데이트본**입니다. **새 Supabase 프로젝트를 생성하지 마세요.** 이전 v3.0 개인전과 v4.0 2단계 팀 배정/대기실을 유지합니다.
 
-## 확정 규칙
+## 이번 단계에서 실제 가능한 기능
 
-- 방 생성 및 6자리 코드 입장, 2~20명, 1~10라운드
-- 2분 / 3분 / 5분, 설명자 중복 최소화 순환 (각 라운드 한 명)
-- 설명자에게만 원본 사진 공개, 참가자 개인 그림판, 약 1.4초 상태 폴링
-- 설명자가 익명 그림 1등(100점) / 2등(70점) / 3등(50점)을 직접 선정
-- 참가자 수가 2명 또는 3명일 때는 가능한 순위 수만 선정
-- 게임 최종 결과 및 누적 점수
-- 관리자 이메일 로그인 후 사진 업로드 (5MB 이하 JPG/PNG/WEBP), 비공개 사진 버킷
+| 모드 | 현재 지원 범위 |
+| --- | --- |
+| 개인전 + 랜덤 | 카테고리 필터, 사용한 사진보다 미사용 사진 우선, 기존 그림·심사·결과 정상 진행 |
+| 개인전 + 사진선택 | **실제 진행 가능**: 설명자 선정 → 설명자 전용 사진 목록·썸네일 → 사진 확정 시 타이머 시작 → 그림 → 기존 1~3등 심사 → 결과 → 다음 라운드 |
+| 팀전 + 랜덤 | 방 생성/입장/팀 배정까지만 가능. 실제 팀 라운드는 4단계 |
+| 팀전 + 사진선택 | 방 생성/입장/팀 배정까지만 가능. 팀 설명자 선택·투표는 4~5단계 |
 
-## 필수 1 — Supabase 프로젝트 준비
+관리자는 사진 등록 시 **실제인물 / 동물 / SOOP / 애니메이션 캐릭터** 중 1개 카테고리를 설정합니다. 이전 사진의 카테고리를 수정하거나 출제 허용을 해제할 수 있습니다. 방장은 출제 카테고리를 복수 선택합니다. **기존 사진의 기본 카테고리는 실제인물**이므로 운영 전에 분류를 재확인하세요.
 
-1. https://supabase.com 에서 새 프로젝트를 만듭니다.
-2. **Authentication → Providers → Anonymous Sign-ins**를 켭니다. 참가자는 로그인 화면 없이 익명 인증됩니다.
-3. **SQL Editor → New Query**에서 `supabase/schema.sql` 전체를 실행합니다. **새 프로젝트에 한 번 실행**하는 용도입니다. 이미 같은 이름의 정책이 있으면 중복 실행 시 오류가 날 수 있습니다.
-4. **Authentication → Users → Add user**에서 관리자의 이메일 계정과 비밀번호를 만듭니다.
-5. 관리자 계정이 생성되면 SQL Editor에서 다음 명령을 실행해 관리자 권한을 부여합니다. 아래 이메일을 반드시 본인 이메일로 바꾸세요.
+## 설치 — 반드시 순서대로
 
-   ```sql
-   insert into public.dd_admins(user_id)
-   select id from auth.users where email = 'YOUR_ADMIN_EMAIL@example.com'
-   on conflict do nothing;
-   ```
+1. **Supabase 데이터베이스 백업**: 운영 데이터 보존이 중요하면 테이블 Export 등을 통해 별도 백업을 먼저 확보하세요.
+2. 기존 `draw-describe-game` Supabase 프로젝트에서 이전 `schema.sql`, `001_v4_team_blind_migration.sql`, `002_v4_lobby_modes.sql`이 **이미 적용되었는지** 확인하세요. **001이나 002를 다시 실행하지 마세요.**
+3. SQL Editor → New query → 이번 ZIP의 **`supabase/003_v4_photo_selection.sql` 내용만** 붙여넣고 Run. `Success. No rows returned` 확인.
+4. ZIP을 풀고 `public/`, `supabase/`, `tests/`, `scripts/`, `package.json`, `README.md`, `vercel.json` 등을 **기존 GitHub Desktop의 `draw-describe-game` 로컬 저장소 최상위에 덮어쓰기**. `.git` 및 개인 `.env` 파일을 삭제하거나 커밋하지 마세요.
+5. GitHub Desktop에서 **Commit to main → Push origin**. Vercel → Deployments에서 Ready 확인. `SUPABASE_URL`, `SUPABASE_ANON_KEY`는 기존 설정 유지.
+6. 관리자 사진 페이지(`/admin.html`)에서 분류를 확인/수정하고 활성 사진을 2~5개 등록해 테스트하세요.
+7. 게임 사이트에서 개인전 + 사진선택으로 최소 2명이 참가해: 준비 → 시작 → **설명자만 사진 목록** → 확정 → 제한시간 시작 → 그림 제출 → 설명자 평가 → 다음 라운드까지 확인하세요.
 
-6. **Project Settings → API** (화면 구성에 따라 `Connect` 또는 `API Keys`)에서 Project URL과 **publishable/anon 키**를 확인합니다.
+## 보안과 중요한 경계
 
-> `service_role` / `secret` 키를 브라우저나 Vercel 공개 변수에 절대로 넣지 마세요. 공개용 anon/publishable 키만 씁니다. 표준 RLS 정책과 서버측 RPC가 데이터 접근을 제한합니다.
+- 사진 목록과 저장 경로는 `dd_v4_photo_options` 서버 함수에서 **현재 개인전의 설명자만** 조회합니다.
+- 사진 원본은 Supabase의 private `dd-originals` 버킷에 남으며, Storage 읽기 정책도 **설명자·허용 카테고리·현재 단계**를 검사합니다. 썸네일은 만료 시간 120초의 signed URL입니다.
+- 선택한 원본은 `dd_v4_choose_photo`에서 DB를 잠그고 현재 설명자, 현재 라운드, 사진 활성화, 카테고리를 검사한 뒤 확정합니다. 타이머는 이 시점부터 시작합니다.
+- 개인전+랜덤은 기존 흐름을 유지합니다. 중복 사진은 아직 사용하지 않은 사진을 우선합니다. 사진을 모두 사용한 후에는 재사용할 수 있습니다. 사진 선택에서는 사용된 사진을 뒤로 표시하지만 수동 재선택은 허용합니다.
+- 팀전에서는 서버 트리거가 라운드 시작을 막습니다. 다음 단계에서 팀별 설명자·상대 팀 투표를 구현하기 전까지 **팀전 전체 플레이를 지원한다고 안내하면 안 됩니다**.
+- 수동 직접 사용자의 브라우저를 검사한 것은 아닙니다. 현재 테스트는 JS 문법, 정적 검사, 로컬 Vercel 빌드 검사이며 **운영 Supabase에 대한 SQL 실행 및 브라우저 다중 사용자 테스트는 미실시**입니다.
 
-## 필수 2 — Vercel에 웹사이트 배포
-
-1. 이 프로젝트의 파일들을 GitHub 새 저장소에 올립니다. (프로젝트 루트에 package.json, public/, supabase/가 있어야 합니다.)
-2. https://vercel.com 에서 **Add New → Project → Import**로 저장소를 선택합니다.
-3. **Environment Variables**에 다음 두 항목을 등록합니다.
-
-   - `SUPABASE_URL` = `https://xxxx.supabase.co`
-   - `SUPABASE_ANON_KEY` = Supabase `publishable` 또는 `anon` 키
-
-4. **Deploy**를 누르면 Vercel이 `npm run build`를 실행해서 `dist/`를 만들고 사이트를 배포합니다.
-5. 발급된 `https://프로젝트이름.vercel.app` 사이트에서 **방 만들기**와 **코드로 입장하기**를 사용합니다.
-6. 사진을 올리려면 `https://프로젝트이름.vercel.app/admin.html`에 접속해 관리자 이메일로 로그인합니다.
-
-## 로컬 테스트 (Node.js 20 이상)
+## 테스트 명령 (Node.js 20 이상)
 
 ```bash
-# Windows PowerShell
-$env:SUPABASE_URL="https://YOUR-PROJECT.supabase.co"
-$env:SUPABASE_ANON_KEY="YOUR-PUBLISHABLE-OR-ANON-KEY"
+npm test
 npm run build
-npm run preview
 ```
 
-브라우저 `http://localhost:3000` 접속. 서로 다른 유저를 시뮬레이션하려면 일반 창과 시크릿 창을 이용합니다. 같은 브라우저 프로필의 두 탭은 익명 인증 ID를 공유하므로 **두 명으로 인식되지 않습니다**.
-
-## 진행 중 유의점
-
-- 인터넷 실서비스 주소는 이 ZIP만으로 만들어지지 않습니다. 반드시 본인 Supabase 및 Vercel 프로젝트 연결/배포가 필요합니다.
-- 방·점수·그림 데이터는 PostgreSQL에 보존됩니다. 파일 서버를 켜둘 필요는 없습니다.
-- 저장 상태는 약 1.4초 간격으로 확인하며, Canvas 그림은 선을 그릴 때마다 서버에 저장합니다. 매우 많은 선을 그리면 그림 데이터 150KB 제한에 도달할 수 있습니다.
-- 사진 링크는 private Storage의 제한시간이 있는 signed URL을 사용하며, 원본 경로는 설명자에게만 공개됩니다(심사 이후 결과 화면에서는 참가자 모두 볼 수 있습니다). 화면 공유/개발자 도구를 사용하는 설명자가 원본을 유출하는 것까지 기술적으로 막을 수는 없습니다.
-- 게임 도중 신규 참가·임의 퇴장은 지원하지 않습니다. 새로고침으로 동일한 브라우저에 복귀할 수 있습니다.
-- 참가자 접속 상태는 별도의 Presence/WebSocket이 아니라 현재 등록 인원 기반입니다. 플레이어별 실시간 온라인/오프라인 감지는 후속 작업입니다.
-- 첫 버전에서는 매 라운드 작성자 익명 심사를 지원하지만, 친구들 사이에서 그림 스타일로 작성자를 추측할 수는 있습니다.
-- 개인정보 및 장기 운영을 위해 **휴면 방 자동 삭제, 오래된 그림 정리, 악용 방지 속도 제한, 운영자 신고/차단** 기능을 배포 뒤 추가하는 것이 권장됩니다.
-- **20명 부하 테스트는 아직 진행하지 않았습니다.** 소규모 실제 접속 검증을 먼저 하고 확대하세요.
-
-## 파일 구성
-
-```text
-public/index.html      게임 화면
-public/app.js          게임 UI + Supabase 연결
-public/styles.css      스타일
-public/admin.html      관리자 전용 사진 관리 화면
-public/admin.js        사진 업로드 및 관리자 인증
-public/config.js       개발용 공개 환경설정 자리표시자
-supabase/schema.sql    테이블, 권한, RPC, private Storage 정책
-scripts/build.mjs      Vercel 빌드, 환경변수 주입
-scripts/preview.mjs    로컬 미리보기 서버
-vercel.json            Vercel 설정
-```
-
-## 검증 범위
-
-`npm test` = 정적 프로젝트 검사. `node --check public/app.js`는 JS 문법 검사입니다. 실제 Supabase API 접근 및 여러 사용자 실접속 테스트는 **본인 프로젝트 키를 연결한 이후**에 실행해야 합니다.
-
-## v4.0 2단계 업데이트 (기존 프로젝트 유지)
-
-**기존 Supabase 프로젝트를 삭제하거나 `schema.sql`을 재실행하지 마세요.** 기존 v3 데이터와 관리자 계정은 그대로 유지합니다.
-
-1. 이전 단계의 `supabase/001_v4_team_blind_migration.sql`을 **이미 실행했다면 재실행하지 마세요**. 아직 실행하지 않았다면 먼저 실행합니다.
-2. Supabase SQL Editor에서 `supabase/002_v4_lobby_modes.sql`을 전체 실행합니다.
-3. ZIP 안의 `public/`, `scripts/`, `tests/`, `package.json`, `vercel.json` 등을 기존 GitHub 저장소 루트에 덮어씌우고 GitHub Desktop에서 Commit → Push origin 합니다. `supabase/` 폴더도 함께 올립니다.
-4. Vercel에서 새 배포가 Ready가 되면 강력 새로고침(Ctrl+Shift+R)합니다. 기존 환경변수는 유지합니다.
-5. 관리자 `/admin.html`에서 새 사진을 업로드할 때 카테고리를 지정합니다. **이전 사진은 기본적으로 '실제인물'로 분류**되므로 필요하면 Supabase Table Editor에서 `dd_photos.category`를 수정하세요.
-6. 일반/시크릿 브라우저에서 각각 입장하여 방 생성, 팀 자동/수동 배정, 준비 상태 반영, 개인전+랜덤 라운드 시작을 시험합니다.
-
-**이번 단계에서 실제 진행 가능한 모드:** 개인전+랜덤(선택한 카테고리 필터 적용). 팀전+랜덤, 개인전+사진선택, 팀전+사진선택은 **방 생성·실시간 대기실·팀 배정까지만** 지원합니다. 미완성 게임 시작은 UI와 DB 트리거에서 차단합니다. 팀전 블라인드 투표/점수와 사진 직접 선택은 다음 단계입니다. 실시간 대기실은 1.4초 폴링이며 WebSocket Presence는 아닙니다.
-
-주의: 정적 테스트만 수행했습니다. 실제 Supabase SQL 실행/원격 배포/멀티유저 브라우저 검증은 이 환경에서 하지 않았습니다.
+환경변수를 설정하지 않으면 빌드 출력의 `config.js`에 예시 키가 남습니다. 배포는 기존 Vercel 환경변수로 빌드하세요. 비밀 키 `sb_secret_...`나 `service_role`를 GitHub/브라우저에 등록하지 마세요.

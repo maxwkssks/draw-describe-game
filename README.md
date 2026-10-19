@@ -85,3 +85,18 @@ vercel.json            Vercel 설정
 ## 검증 범위
 
 `npm test` = 정적 프로젝트 검사. `node --check public/app.js`는 JS 문법 검사입니다. 실제 Supabase API 접근 및 여러 사용자 실접속 테스트는 **본인 프로젝트 키를 연결한 이후**에 실행해야 합니다.
+
+## v4.0 2단계 업데이트 (기존 프로젝트 유지)
+
+**기존 Supabase 프로젝트를 삭제하거나 `schema.sql`을 재실행하지 마세요.** 기존 v3 데이터와 관리자 계정은 그대로 유지합니다.
+
+1. 이전 단계의 `supabase/001_v4_team_blind_migration.sql`을 **이미 실행했다면 재실행하지 마세요**. 아직 실행하지 않았다면 먼저 실행합니다.
+2. Supabase SQL Editor에서 `supabase/002_v4_lobby_modes.sql`을 전체 실행합니다.
+3. ZIP 안의 `public/`, `scripts/`, `tests/`, `package.json`, `vercel.json` 등을 기존 GitHub 저장소 루트에 덮어씌우고 GitHub Desktop에서 Commit → Push origin 합니다. `supabase/` 폴더도 함께 올립니다.
+4. Vercel에서 새 배포가 Ready가 되면 강력 새로고침(Ctrl+Shift+R)합니다. 기존 환경변수는 유지합니다.
+5. 관리자 `/admin.html`에서 새 사진을 업로드할 때 카테고리를 지정합니다. **이전 사진은 기본적으로 '실제인물'로 분류**되므로 필요하면 Supabase Table Editor에서 `dd_photos.category`를 수정하세요.
+6. 일반/시크릿 브라우저에서 각각 입장하여 방 생성, 팀 자동/수동 배정, 준비 상태 반영, 개인전+랜덤 라운드 시작을 시험합니다.
+
+**이번 단계에서 실제 진행 가능한 모드:** 개인전+랜덤(선택한 카테고리 필터 적용). 팀전+랜덤, 개인전+사진선택, 팀전+사진선택은 **방 생성·실시간 대기실·팀 배정까지만** 지원합니다. 미완성 게임 시작은 UI와 DB 트리거에서 차단합니다. 팀전 블라인드 투표/점수와 사진 직접 선택은 다음 단계입니다. 실시간 대기실은 1.4초 폴링이며 WebSocket Presence는 아닙니다.
+
+주의: 정적 테스트만 수행했습니다. 실제 Supabase SQL 실행/원격 배포/멀티유저 브라우저 검증은 이 환경에서 하지 않았습니다.

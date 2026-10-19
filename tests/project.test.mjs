@@ -4,7 +4,7 @@ import {readFileSync,existsSync} from 'node:fs';
 const root=new URL('../',import.meta.url);
 const read=p=>readFileSync(new URL(p,root),'utf8');
 test('core website files exist',()=>{for(const p of ['public/index.html','public/app.js','public/admin.html','public/admin.js','supabase/schema.sql','vercel.json'])assert.ok(existsSync(new URL(p,root)),p)});
-test('game UI uses Supabase RPC instead of local Node API',()=>{const s=read('public/app.js');assert.match(s,/db\.rpc\(name,args\)/);assert.match(s,/dd_create_room/);assert.match(s,/dd_state/);assert.doesNotMatch(s,/fetch\('\/api\//)});
+test('game UI uses Supabase RPC instead of local Node API',()=>{const s=read('public/app.js');assert.match(s,/db\.rpc\(name,args\)/);assert.match(s,/dd_v4_create_room/);assert.match(s,/dd_state/);assert.doesNotMatch(s,/fetch\('\/api\//)});
 test('auth and storage policies present',()=>{const s=read('supabase/schema.sql');assert.match(s,/enable row level security/);assert.match(s,/dd_can_read_photo/);assert.match(s,/dd_is_admin/);assert.match(s,/dd_action/);assert.match(s,/phase='judge'/)});
 test('admin uses separate authentication storage',()=>assert.match(read('public/admin.js'),/storageKey:'dd-admin-auth'/));
 test('Vercel output matches generated dist',()=>assert.equal(JSON.parse(read('vercel.json')).outputDirectory,'dist'));

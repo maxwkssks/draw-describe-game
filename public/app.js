@@ -35,8 +35,8 @@ async function api(route,method='GET',body=null){
  if(route==='join'){const code=await rpc('dd_join_room',{p_code:body.code,p_name:body.name});roomCode=code;localStorage.setItem('dd_room_code',code);return {code,state:await rpc('dd_state',{p_code:code})}}
  if(route==='state')return await rpc('dd_state',{p_code:roomCode});
  if(route==='action'){
+   if(body.action==='leave'){await rpc('dd_v551_leave_room',{p_code:roomCode});return null;}
    await rpc('dd_action',{p_code:roomCode,p_action:body.action,p_data:body});
-   if(body.action==='leave')return null;
    return await rpc('dd_state',{p_code:roomCode});
  }
  throw Error('알 수 없는 요청');
@@ -90,7 +90,8 @@ async function recoverRound(){
 }
 async function leaveGame(){
  if(!roomCode||!state)return;
- const warn=state.host?'방장을 나가면 남은 참가자에게 방장 권한이 넘어갑니다. 나갈까요?':'현재 게임에서 나갈까요?';
+ const active=['photo_select','draw','judge','vote'].includes(state.phase);
+ const warn=active?'게임 진행 중에 나가면 현재 라운드가 취소되고 남은 참가자는 대기실로 돌아갑니다. 이미 완료된 라운드 기록은 보존됩니다. 나갈까요?':state.host?'방장을 나가면 남은 참가자에게 방장 권한이 넘어갑니다. 나갈까요?':'현재 게임에서 나갈까요?';
  if(!confirm(warn))return;
  await act('leave');
 }

@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const app=fs.readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+const sql=fs.readFileSync(new URL('../supabase/011_v5_5_1_leave_during_game.sql',import.meta.url),'utf8');
+test('leave uses dedicated RPC instead of guarded dd_action',()=>{assert.match(app,/dd_v551_leave_room/);assert.match(app,/if\(body.action==='leave'\)/);});
+test('leave always clears local room only after RPC success',()=>assert.match(app,/if\(action==='leave'\)\{sessionGeneration\+\+;roomCode=null/));
+test('active leave resets incomplete round but retains historical scores',()=>{assert.match(sql,/r.phase IN \('photo_select','draw','judge','vote'\)/);assert.match(sql,/round_no=r.round_no/);assert.match(sql,/dd_departed_players/);assert.doesNotMatch(sql,/DELETE FROM public.dd_team_round_results/i);});
+test('host is transferred and single member room removed',()=>{assert.match(sql,/r.host_id=auth.uid\(\)/);assert.match(sql,/remaining=0/)});
+test('historical ballots do not cascade on player deletion',()=>{assert.match(sql,/DROP CONSTRAINT/);assert.match(sql,/dd_vote_assignments/)});

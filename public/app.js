@@ -8,9 +8,27 @@ const configured=cfg.supabaseUrl?.startsWith('https://')&&cfg.supabaseAnonKey&&!
 const db=configured?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'dd-game-auth'}}):null;
 let ballot=null,ballotKey='',ballotLoading=false,voteSending=false,voteRatings={};
 let liveGalleryLoading=false,liveGalleryLast=0,liveGalleryRound='',liveGalleryOpen=true;
-let presenceMeta=null,lastPresencePing=0,presenceInFlight=false,syncInFlight=false;let authReady=false;let lobbyMeta=null;let metaFetchRunning=false;let lobbyLastUpdated=0,sessionGeneration=0;let photoOptions=null;let photoOptionsKey='';let optionsLoading=false;let photoChoosing=false;
+let presenceMeta=null,lastPresencePing=0,presenceInFlight=false,syncInFlight=false;let authReady=false,authPromise=null;let syncSequence=0;let lobbyMeta=null;let metaFetchRunning=false;let lobbyLastUpdated=0,sessionGeneration=0;let photoOptions=null;let photoOptionsKey='';let optionsLoading=false;let photoChoosing=false;
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3600)}
-async function ensureAuth(){if(!configured)throw Error('config.js에 Supabase URL과 공개 키를 입력하세요');if(authReady)return;const {data:{session}}=await db.auth.getSession();if(!session){const {error}=await db.auth.signInAnonymously();if(error)throw error}authReady=true;}
+async function ensureAuth(){
+ if(!configured)throw Error('config.js에 Supabase URL과 공개 키를 입력하세요');
+ if(authReady)return;
+ // Room polling and presence requests may start together: only one sign-in is allowed.
+ if(!authPromise)authPromise=(async()=>{
+   const {data,error:sessionError}=await db.auth.getSession();
+   if(sessionError)throw sessionError;
+   if(!data?.session){const {error}=await db.auth.signInAnonymously();if(error)throw error}
+   authReady=true;
+ })().finally(()=>{authPromise=null});
+ return authPromise;
+}
+function withDeadline(promise,ms,label){
+ // A request that never responds must not permanently lock the UI polling loop.
+ let timeout;
+ return Promise.race([promise,new Promise((_,reject)=>{timeout=setTimeout(()=>reject(new Error(label+' 응답 시간 초과')),ms)})])
+   .finally(()=>clearTimeout(timeout));
+}
+
 async function rpc(name,args){await ensureAuth();const {data,error}=await db.rpc(name,args);if(error)throw new Error(error.message);return data;}
 async function api(route,method='GET',body=null){
  if(route==='create'){const code=await rpc('dd_v5_create_room',{p_name:body.name,p_max_players:body.maxPlayers,p_rounds:body.rounds,p_duration:body.duration,p_match_type:body.matchType,p_photo_mode:body.photoMode,p_categories:body.categories,p_target:body.target??null});roomCode=code;localStorage.setItem('dd_room_code',code);return {code,state:await rpc('dd_state',{p_code:code})}}
@@ -43,23 +61,23 @@ lastSignature=signature;updateClock();checkCutoff();}
 async function pingPresence(){
  if(!roomCode||presenceInFlight||Date.now()-lastPresencePing<6500)return;
  presenceInFlight=true;
- try{presenceMeta=await rpc('dd_v5_presence_ping',{p_code:roomCode});lastPresencePing=Date.now();}
+ try{const pingRoom=roomCode,pingSession=sessionGeneration;const next=await withDeadline(rpc('dd_v5_presence_ping',{p_code:pingRoom}),10000,'접속 확인');if(pingRoom===roomCode&&pingSession===sessionGeneration){presenceMeta=next;lastPresencePing=Date.now();}}
  finally{presenceInFlight=false;}
 }
 async function sync(){
  if(!roomCode||syncInFlight)return;
- const requestedRoom=roomCode,requestedSession=sessionGeneration;
+ const requestedRoom=roomCode,requestedSession=sessionGeneration,requestId=++syncSequence;
  syncInFlight=true;
  try{
    // Fetch the room roster first. A delayed heartbeat must not block new arrivals.
-   const s=await api('state');
-   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession)return;
+   const s=await withDeadline(api('state'),10000,'게임 상태 조회');
+   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession||requestId!==syncSequence)return;
    onState(s);
    if(s.phase==='lobby')refreshLobbyMeta();
    // Never hold the roster synchronization lock for a slow heartbeat.
    pingPresence().catch(e=>console.warn('Presence heartbeat failed:',e.message));
  }catch(e){
-   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession)return;
+   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession||requestId!==syncSequence)return;
    if(e.message.includes('참가자가 아닙니다')||e.message.includes('방을 찾을 수 없습니다')||e.message.includes('이 방의 참가자가 아닙니다')){
      sessionGeneration++;localStorage.removeItem('dd_room_code');roomCode=null;state=null;presenceMeta=null;lobbyMeta=null;show('home');toast('방 연결이 종료됐습니다');
    }else{$('#status').textContent='● 재연결 시도 중';$('#status').className='pill disconnected';}
@@ -82,7 +100,7 @@ async function refreshLobbyMeta(){
  const requestedRoom=roomCode,requestedSession=sessionGeneration;
  metaFetchRunning=true;
  try{
-  const meta=await rpc('dd_v4_lobby',{p_code:requestedRoom});
+  const meta=await withDeadline(rpc('dd_v4_lobby',{p_code:requestedRoom}),10000,'대기실 조회');
   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession)return;
   if(JSON.stringify(meta)!==JSON.stringify(lobbyMeta)){
     lobbyMeta=meta;

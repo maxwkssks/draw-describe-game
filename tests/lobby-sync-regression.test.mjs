@@ -35,7 +35,7 @@ test('newer roster rerenders lobby, older response does not roll it back',()=>{
 test('heartbeat that never responds cannot hold the state polling lock',async()=>{
   const src=functionSource('async function sync(){','async function recoverRound(){');
   let handled=0;
-  const ctx={roomCode:'123456',syncInFlight:false,sessionGeneration:1,state:null,pingPresence:()=>new Promise(()=>{}),refreshLobbyMeta:()=>Promise.resolve(),onState:()=>handled++,api:()=>Promise.resolve({code:'123456',phase:'lobby',players:[],revision:1}),$:()=>({}),console,localStorage:{removeItem(){}},show(){},toast(){}};
+  const ctx={roomCode:'123456',syncInFlight:false,syncSequence:0,sessionGeneration:1,state:null,withDeadline:p=>p,pingPresence:()=>new Promise(()=>{}),refreshLobbyMeta:()=>Promise.resolve(),onState:()=>handled++,api:()=>Promise.resolve({code:'123456',phase:'lobby',players:[],revision:1}),$:()=>({}),console,localStorage:{removeItem(){}},show(){},toast(){}};
   vm.createContext(ctx);vm.runInContext(src+'\nthis.sync=sync;',ctx);
   await Promise.race([ctx.sync(),new Promise((_,reject)=>setTimeout(()=>reject(Error('sync stuck')),400))]);
   assert.equal(handled,1);

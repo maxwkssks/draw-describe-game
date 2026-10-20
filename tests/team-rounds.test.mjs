@@ -5,5 +5,5 @@ test('team narrators selected individually',()=>{assert.match(sql,/red_narrator_
 test('team same photo used and hidden from artists',()=>{assert.match(sql,/r\.photo_id=f\.id/);assert.match(sql,/r\.blue_narrator_id/);assert.match(sql,/IF r\.photo_id IS NOT NULL/)});
 test('snapshots and no premature scoring',()=>{assert.match(sql,/INSERT INTO public\.dd_round_drawings/);assert.match(sql,/phase='vote'/);assert.doesNotMatch(sql,/INSERT INTO public\.dd_votes/)});
 test('legacy solo funcs preserved behind wrapper',()=>{assert.match(sql,/RENAME TO dd_v3_state/);assert.match(sql,/RENAME TO dd_v3_action/);assert.match(sql,/RETURN public\.dd_v3_state/);assert.match(sql,/RETURN public\.dd_v3_action/)});
-test('team lobby start and pending phase have UI',()=>{assert.match(js,/vote:'teamPending'/);assert.match(js,/function teamPending/);assert.match(js,/teamReady/)});
+test('team lobby start and vote phase have UI',()=>{assert.match(js,/vote:'teamVote'/);assert.match(js,/function teamVote/);assert.match(js,/teamReady/)});
 test('step 4 does not drop data',()=>{assert.doesNotMatch(sql,/DROP TABLE|TRUNCATE|DELETE FROM public\.dd_/i)});

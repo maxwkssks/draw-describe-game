@@ -30,6 +30,7 @@ test('submission during pending autosave is not dropped',async()=>{
  const ctx={
  state:{phase:'draw',isNarrator:false}, saving:false,queued:false,queuedSubmit:false,
  dirty:true, strokes:[{points:[[1,2]]}],lastSaved:0,Date,JSON,
+ editVersion:0,submittedLocally:false,setTimeout,
  $:()=>box,
  actDrawing:async (data, submitted)=>{calls.push({data,submitted});if(calls.length===1)await blocker;},
  };
@@ -40,7 +41,7 @@ test('submission during pending autosave is not dropped',async()=>{
  const second=vm.runInContext('saveDrawing(true)',ctx);
  release();
  await Promise.all([first,second]);
- await new Promise(resolve=>setImmediate(resolve));
+ await new Promise(resolve=>setTimeout(resolve,750));
  assert.equal(calls.length,2);
  assert.deepEqual(calls.map(c=>c.submitted),[false,true]);
 });

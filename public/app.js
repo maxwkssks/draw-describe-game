@@ -8,7 +8,7 @@ const configured=cfg.supabaseUrl?.startsWith('https://')&&cfg.supabaseAnonKey&&!
 const db=configured?window.supabase.createClient(cfg.supabaseUrl,cfg.supabaseAnonKey,{auth:{persistSession:true,autoRefreshToken:true,storageKey:'dd-game-auth'}}):null;
 let ballot=null,ballotKey='',ballotLoading=false,voteSending=false,voteRatings={};
 let liveGalleryLoading=false,liveGalleryLast=0,liveGalleryRound='',liveGalleryOpen=true;
-let presenceMeta=null,lastPresencePing=0,presenceInFlight=false,syncInFlight=false;let authReady=false;let lobbyMeta=null;let metaFetchRunning=false;let photoOptions=null;let photoOptionsKey='';let optionsLoading=false;let photoChoosing=false;
+let presenceMeta=null,lastPresencePing=0,presenceInFlight=false,syncInFlight=false;let authReady=false;let lobbyMeta=null;let metaFetchRunning=false;let lobbyLastUpdated=0,sessionGeneration=0;let photoOptions=null;let photoOptionsKey='';let optionsLoading=false;let photoChoosing=false;
 function toast(msg){const t=$('#toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3600)}
 async function ensureAuth(){if(!configured)throw Error('config.js에 Supabase URL과 공개 키를 입력하세요');if(authReady)return;const {data:{session}}=await db.auth.getSession();if(!session){const {error}=await db.auth.signInAnonymously();if(error)throw error}authReady=true;}
 async function rpc(name,args){await ensureAuth();const {data,error}=await db.rpc(name,args);if(error)throw new Error(error.message);return data;}
@@ -25,9 +25,12 @@ async function api(route,method='GET',body=null){
 }
 const phaseMap={lobby:'lobby',photo_select:'photoSelect',draw:'game',judge:'judge',vote:'teamVote',result:'result',final:'final'};
 function show(name){view=name;lastSignature='';render()}
-function saveSession(out){presenceMeta=null;lastPresencePing=0;roomCode=out.code;lobbyMeta=null;localStorage.setItem('dd_room_code',roomCode);state=out.state;strokes=[];show(phaseMap[state.phase]);if(state.phase==='lobby')refreshLobbyMeta();}
-async function act(action,extra={}){try{const s=await api('action','POST',{action,...extra});if(action==='leave'){roomCode=null;state=null;presenceMeta=null;localStorage.removeItem('dd_room_code');show('home')}else onState(s,true)}catch(e){toast(e.message)}}
+function saveSession(out){sessionGeneration++;presenceMeta=null;lastPresencePing=0;lobbyLastUpdated=Date.now();roomCode=out.code;lobbyMeta=null;localStorage.setItem('dd_room_code',roomCode);state=out.state;strokes=[];show(phaseMap[state.phase]);if(state.phase==='lobby')refreshLobbyMeta();}
+async function act(action,extra={}){try{const s=await api('action','POST',{action,...extra});if(action==='leave'){sessionGeneration++;roomCode=null;state=null;presenceMeta=null;lobbyMeta=null;localStorage.removeItem('dd_room_code');show('home')}else onState(s,true)}catch(e){toast(e.message)}}
 function onState(s,force=false){
+ // A delayed response must not replace a newer participant list or phase.
+ if(state?.code===s.code&&Number.isFinite(+state.revision)&&Number.isFinite(+s.revision)&&+s.revision<+state.revision)return;
+ if(s.phase==='lobby')lobbyLastUpdated=Date.now();
  if(presenceMeta?.players&&Array.isArray(s.players)){
    const online=new Map(presenceMeta.players.map(p=>[p.id,p.online]));
    s.players=s.players.map(p=>({...p,online:online.get(p.id)??p.online}));
@@ -45,15 +48,20 @@ async function pingPresence(){
 }
 async function sync(){
  if(!roomCode||syncInFlight)return;
+ const requestedRoom=roomCode,requestedSession=sessionGeneration;
  syncInFlight=true;
  try{
-   // Never show a stale host after a successful heartbeat-triggered reassignment.
-   await pingPresence();
-   const s=await api('state');onState(s);
-   if(s.phase==='lobby')await refreshLobbyMeta();
+   // Fetch the room roster first. A delayed heartbeat must not block new arrivals.
+   const s=await api('state');
+   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession)return;
+   onState(s);
+   if(s.phase==='lobby')refreshLobbyMeta();
+   // Never hold the roster synchronization lock for a slow heartbeat.
+   pingPresence().catch(e=>console.warn('Presence heartbeat failed:',e.message));
  }catch(e){
+   if(roomCode!==requestedRoom||sessionGeneration!==requestedSession)return;
    if(e.message.includes('참가자가 아닙니다')||e.message.includes('방을 찾을 수 없습니다')||e.message.includes('이 방의 참가자가 아닙니다')){
-     localStorage.removeItem('dd_room_code');roomCode=null;state=null;presenceMeta=null;show('home');toast('방 연결이 종료됐습니다');
+     sessionGeneration++;localStorage.removeItem('dd_room_code');roomCode=null;state=null;presenceMeta=null;lobbyMeta=null;show('home');toast('방 연결이 종료됐습니다');
    }else{$('#status').textContent='● 재연결 시도 중';$('#status').className='pill disconnected';}
  }finally{syncInFlight=false;}
 }
@@ -69,7 +77,20 @@ async function leaveGame(){
  await act('leave');
 }
 async function doCreate(){const name=$('#nickname').value.trim(),maxPlayers=+$('#people').value,rounds=+$('#rounds').value,duration=+$('.option.selected').dataset.mode;const matchType=$('#match-type').value,photoMode=$('#photo-mode').value;const categories=$$('[data-category]:checked').map(x=>x.value);const target=duration===0?+$('#completion-target').value:null;if(!categories.length)return toast('최소 한 개의 사진 카테고리를 선택하세요');if(matchType==='team'&&maxPlayers<4)return toast('팀전 정원은 최소 4명이어야 합니다');try{saveSession(await api('create','POST',{name,maxPlayers,rounds,duration,matchType,photoMode,categories,target}))}catch(e){toast(e.message)}}
-async function refreshLobbyMeta(){if(metaFetchRunning||!roomCode)return;metaFetchRunning=true;try{const meta=await rpc('dd_v4_lobby',{p_code:roomCode});if(JSON.stringify(meta)!==JSON.stringify(lobbyMeta)){lobbyMeta=meta;if(state?.phase==='lobby'&&view==='lobby')render()}}catch(e){console.warn('Lobby metadata unavailable',e.message)}finally{metaFetchRunning=false}}
+async function refreshLobbyMeta(){
+ if(metaFetchRunning||!roomCode)return;
+ const requestedRoom=roomCode,requestedSession=sessionGeneration;
+ metaFetchRunning=true;
+ try{
+  const meta=await rpc('dd_v4_lobby',{p_code:requestedRoom});
+  if(roomCode!==requestedRoom||sessionGeneration!==requestedSession)return;
+  if(JSON.stringify(meta)!==JSON.stringify(lobbyMeta)){
+    lobbyMeta=meta;
+    if(state?.phase==='lobby'&&view==='lobby')render();
+  }
+ }catch(e){if(roomCode===requestedRoom)console.warn('Lobby metadata unavailable',e.message)}
+ finally{metaFetchRunning=false}
+}
 async function assignTeams(mode,id=null,team=null){try{await rpc('dd_v4_assign_teams',{p_code:roomCode,p_mode:mode,p_player_id:id,p_team:team});await refreshLobbyMeta();await sync()}catch(e){toast(e.message)}}
 async function doJoin(){const name=$('#join-name').value.trim(),code=$('#join-code').value.trim();try{saveSession(await api('join','POST',{name,code}))}catch(e){toast(e.message)}}
 function render(){if($('#leave-global'))$('#leave-global').hidden=!roomCode;if($('#recover-global'))$('#recover-global').hidden=!(roomCode&&state?.host&&['photo_select','draw','judge','vote'].includes(state?.phase));if(view!=='game'&&view!=='judge'&&view!=='result'&&view!=='teamVote'&&view!=='final'){photoObject=null;photoKey=''}const views={home,create,join,lobby,photoSelect,game,teamVote,judge,result,final};$('#view').innerHTML=(views[view]||home)();$$('[data-screen]').forEach(el=>el.onclick=()=>show(el.dataset.screen));({create:bindCreate,join:bindJoin,lobby:bindLobby,photoSelect:bindPhotoSelect,game:bindGame,teamVote:bindTeamVote,judge:bindJudge,result:bindResult,final:bindFinal})[view]?.();updateClock()}
@@ -89,8 +110,8 @@ $('#create-now').onclick=doCreate;refresh()}
 function join(){return `<div class="container"><div class="panel center-panel"><span class="eyebrow">JOIN ROOM</span><h2>6자리 코드로 입장</h2><p class="muted">친구에게 받은 6자리 코드를 입력하세요.</p><div class="form-stack"><div class="field"><label>닉네임</label><input class="input" id="join-name" maxlength="16" placeholder="닉네임"/></div><div class="field"><label>방 코드</label><input class="input" id="join-code" maxlength="6" inputmode="numeric" placeholder="123456" value="${esc(new URLSearchParams(location.search).get('room')||'')}"/></div>${btn('참가하기','btn-primary btn-wide','id="join-now"')}</div></div></div>`}
 function bindJoin(){$('#join-now').onclick=doJoin}
 function participants(compact=false){return state.players.map((p,i)=>`<div class="user"><span class="avatar">${i+1}</span><div><strong>${esc(p.name)} ${p.id===state.me?'(나)':''}</strong><small class="${p.ready?'ready-tag':'waiting-tag'}">${p.host?'👑 방장 · ':''}${p.online===false?'오프라인':'접속 중'}${state.phase==='lobby'?p.ready?' · 준비':' · 미준비':(p.isNarrator||p.id===state.narrator)?' · 설명자':p.submitted?' · 저장됨':' · 그림 작업'}</small></div></div>`).join('')}
-function lobby(){const everybody=state.players.every(p=>p.ready);const m=lobbyMeta;const isTeam=m?.matchType==='team';const readyToStart=m&&['solo','team'].includes(m.matchType)&&['random','select'].includes(m.photoMode);const teamReady=!isTeam||(state.players.length>=4&&['red','blue'].every(t=>state.players.filter(p=>(m?.teams||[]).some(x=>x.id===p.id&&x.team===t)).length>=2)&&Math.abs(state.players.filter(p=>(m?.teams||[]).some(x=>x.id===p.id&&x.team==='red')).length-state.players.filter(p=>(m?.teams||[]).some(x=>x.id===p.id&&x.team==='blue')).length)<=1);const teams=Object.fromEntries((m?.teams||[]).map(x=>[x.id,x.team]));const categories={real_person:'실제인물',animal:'동물',soop:'SOOP',anime_character:'애니메이션 캐릭터'};const teamPanel=isTeam?`<div class="panel" style="margin-top:14px"><h3>팀 배정</h3>${state.host?btn('팀 자동 배정','btn-secondary btn-sm','id="auto-teams"'):''}<div class="team-columns">${['red','blue'].map(t=>`<div class="team-col ${t}"><h3>${t==='red'?'🔴 레드팀':'🔵 블루팀'}</h3>${state.players.filter(p=>teams[p.id]===t).map(p=>`<div class="team-entry"><span>${esc(p.name)}</span>${state.host?`<button class="tool" data-switch="${p.id}" data-to="${t==='red'?'blue':'red'}">팀 이동</button>`:''}</div>`).join('')||'<small>배정된 참가자 없음</small>'}</div>`).join('')}</div><p class="tip">새 참가자는 인원이 적은 팀으로 자동 배정됩니다. 방장은 언제든 변경할 수 있습니다.</p></div>`:'';return `<div class="container"><div class="section-heading"><span class="eyebrow">WAITING ROOM</span><h1>참가자 대기실</h1><p>참가자는 준비 버튼을 누르고 방장이 게임을 시작합니다.</p></div><div class="two-col"><section class="panel"><div class="row space-between"><div class="room-code"><small>방 코드</small><strong>${state.code}</strong></div>${btn('초대 링크 복사','btn-secondary btn-sm','id="copy-link"')}</div><h3 style="margin-top:24px">참가자 ${state.players.length}/${state.maxPlayers}</h3><div class="user-grid">${participants()}</div>${teamPanel}<div class="btn-list">${!state.host?btn(state.players.find(p=>p.id===state.me).ready?'준비 취소':'준비 완료','btn-primary','id="ready"'):''}${btn('방 나가기','btn-ghost','id="leave"')}</div></section><section class="panel"><h3>게임 설정</h3><div class="rank-summary"><div class="rank-row"><span>최대 인원</span><strong>${state.maxPlayers}명</strong></div><div class="rank-row"><span>라운드</span><strong>${state.rounds}회</strong></div><div class="rank-row"><span>그림 시간</span><strong>${state.duration===0?'무제한 · 완성 '+(m?.matchType==='team'?'팀당 ':'')+(state.completionTarget??'설정')+'명':state.duration/60+'분'}</strong></div><div class="rank-row"><span>사진 수</span><strong>${m?.eligiblePhotoCount??'확인 중'}장 (카테고리 기준)</strong></div><div class="rank-row"><span>경쟁 방식</span><strong>${isTeam?'팀전':'개인전'}</strong></div><div class="rank-row"><span>사진 방식</span><strong>${m?.photoMode==='select'?'사진 선택':'랜덤'}</strong></div><div class="rank-row"><span>카테고리</span><strong>${(m?.categories||[]).map(x=>categories[x]||x).join(', ')||'불러오는 중'}</strong></div></div>${isTeam?'<div class="notice">팀전은 각 팀 2명 이상, 인원 차이 1명 이하일 때 시작됩니다. 그림 마감 후 참가자들이 익명으로 평가하고 팀 평균 점수를 발표합니다.</div>':''}${state.host?btn('게임 시작 →','btn-primary btn-wide',`id="start-game" ${!readyToStart||!teamReady||state.players.length<2||!everybody||!m?.eligiblePhotoCount?'disabled':''}`):`<div class="notice">방장이 게임을 시작할 때까지 기다려 주세요.</div>`}<p class="tip">최소 2명 · 참가자 모두 준비 · 사진 1장 이상 필요</p></section></div></div>`}
-function bindLobby(){$('#copy-link').onclick=async()=>{const link=location.origin+'/?room='+state.code;try{await navigator.clipboard.writeText(link);toast('초대 링크 복사 완료')}catch{toast(link)}};$('#ready')?.addEventListener('click',()=>act('ready',{value:!state.players.find(p=>p.id===state.me).ready}));$('#start-game')?.addEventListener('click',()=>act('start'));$('#leave').onclick=leaveGame;$('#auto-teams')?.addEventListener('click',()=>assignTeams('auto'));$$('[data-switch]').forEach(el=>el.onclick=()=>assignTeams('manual',el.dataset.switch,el.dataset.to))}
+function lobby(){const everybody=state.players.every(p=>p.ready);const m=lobbyMeta;const isTeam=m?.matchType==='team';const readyToStart=m&&['solo','team'].includes(m.matchType)&&['random','select'].includes(m.photoMode);const teamReady=!isTeam||(state.players.length>=4&&['red','blue'].every(t=>state.players.filter(p=>(m?.teams||[]).some(x=>x.id===p.id&&x.team===t)).length>=2)&&Math.abs(state.players.filter(p=>(m?.teams||[]).some(x=>x.id===p.id&&x.team==='red')).length-state.players.filter(p=>(m?.teams||[]).some(x=>x.id===p.id&&x.team==='blue')).length)<=1);const teams=Object.fromEntries((m?.teams||[]).map(x=>[x.id,x.team]));const categories={real_person:'실제인물',animal:'동물',soop:'SOOP',anime_character:'애니메이션 캐릭터'};const teamPanel=isTeam?`<div class="panel" style="margin-top:14px"><h3>팀 배정</h3>${state.host?btn('팀 자동 배정','btn-secondary btn-sm','id="auto-teams"'):''}<div class="team-columns">${['red','blue'].map(t=>`<div class="team-col ${t}"><h3>${t==='red'?'🔴 레드팀':'🔵 블루팀'}</h3>${state.players.filter(p=>teams[p.id]===t).map(p=>`<div class="team-entry"><span>${esc(p.name)}</span>${state.host?`<button class="tool" data-switch="${p.id}" data-to="${t==='red'?'blue':'red'}">팀 이동</button>`:''}</div>`).join('')||'<small>배정된 참가자 없음</small>'}</div>`).join('')}</div><p class="tip">새 참가자는 인원이 적은 팀으로 자동 배정됩니다. 방장은 언제든 변경할 수 있습니다.</p></div>`:'';return `<div class="container"><div class="section-heading"><span class="eyebrow">WAITING ROOM</span><h1>참가자 대기실</h1><p>참가자는 준비 버튼을 누르고 방장이 게임을 시작합니다.</p></div><div class="two-col"><section class="panel"><div class="row space-between"><div class="room-code"><small>방 코드</small><strong>${state.code}</strong></div>${btn('초대 링크 복사','btn-secondary btn-sm','id="copy-link"')}</div><div class="row space-between" style="margin-top:24px;align-items:center;gap:8px"><h3 style="margin:0">참가자 ${state.players.length}/${state.maxPlayers}</h3>${btn('↻ 인원 새로고침','btn-secondary btn-sm','id="refresh-lobby" type="button"')}</div><p class="tip" id="lobby-updated">인원 목록은 약 1.4초마다 갱신됩니다.</p><div class="user-grid">${participants()}</div>${teamPanel}<div class="btn-list">${!state.host?btn(state.players.find(p=>p.id===state.me).ready?'준비 취소':'준비 완료','btn-primary','id="ready"'):''}${btn('방 나가기','btn-ghost','id="leave"')}</div></section><section class="panel"><h3>게임 설정</h3><div class="rank-summary"><div class="rank-row"><span>최대 인원</span><strong>${state.maxPlayers}명</strong></div><div class="rank-row"><span>라운드</span><strong>${state.rounds}회</strong></div><div class="rank-row"><span>그림 시간</span><strong>${state.duration===0?'무제한 · 완성 '+(m?.matchType==='team'?'팀당 ':'')+(state.completionTarget??'설정')+'명':state.duration/60+'분'}</strong></div><div class="rank-row"><span>사진 수</span><strong>${m?.eligiblePhotoCount??'확인 중'}장 (카테고리 기준)</strong></div><div class="rank-row"><span>경쟁 방식</span><strong>${isTeam?'팀전':'개인전'}</strong></div><div class="rank-row"><span>사진 방식</span><strong>${m?.photoMode==='select'?'사진 선택':'랜덤'}</strong></div><div class="rank-row"><span>카테고리</span><strong>${(m?.categories||[]).map(x=>categories[x]||x).join(', ')||'불러오는 중'}</strong></div></div>${isTeam?'<div class="notice">팀전은 각 팀 2명 이상, 인원 차이 1명 이하일 때 시작됩니다. 그림 마감 후 참가자들이 익명으로 평가하고 팀 평균 점수를 발표합니다.</div>':''}${state.host?btn('게임 시작 →','btn-primary btn-wide',`id="start-game" ${!readyToStart||!teamReady||state.players.length<2||!everybody||!m?.eligiblePhotoCount?'disabled':''}`):`<div class="notice">방장이 게임을 시작할 때까지 기다려 주세요.</div>`}<p class="tip">최소 2명 · 참가자 모두 준비 · 사진 1장 이상 필요</p></section></div></div>`}
+function bindLobby(){$('#refresh-lobby')?.addEventListener('click',async()=>{await sync();if(roomCode&&state?.phase==='lobby')toast('참가자 목록 갱신 완료')});$('#copy-link').onclick=async()=>{const link=location.origin+'/?room='+state.code;try{await navigator.clipboard.writeText(link);toast('초대 링크 복사 완료')}catch{toast(link)}};$('#ready')?.addEventListener('click',()=>act('ready',{value:!state.players.find(p=>p.id===state.me).ready}));$('#start-game')?.addEventListener('click',()=>act('start'));$('#leave').onclick=leaveGame;$('#auto-teams')?.addEventListener('click',()=>assignTeams('auto'));$$('[data-switch]').forEach(el=>el.onclick=()=>assignTeams('manual',el.dataset.switch,el.dataset.to))}
 const photoCategoryNames={real_person:'실제인물',animal:'동물',soop:'SOOP',anime_character:'애니메이션 캐릭터'};
 async function loadPhotoOptions(){
  if(optionsLoading||state?.phase!=='photo_select'||!(state.isSelector??state.isNarrator))return;
@@ -301,6 +322,10 @@ show(new URLSearchParams(location.search).has('room')?'join':'home');
 if(!configured){$('#status').textContent='설정 필요';toast('config.js에 Supabase 설정이 필요합니다')}
 else {$('#status').textContent='연결 준비됨';if(roomCode)sync()}
 setInterval(sync,1400);
+// Background browser tabs throttle timers; refresh immediately on return.
+document.addEventListener('visibilitychange',()=>{if(!document.hidden&&roomCode)sync()});
+window.addEventListener('focus',()=>{if(roomCode)sync()});
+window.addEventListener('online',()=>{if(roomCode)sync()});
 setInterval(loadNarratorGallery,2800);
 document.addEventListener('keydown',e=>{if(e.ctrlKey&&e.shiftKey&&e.code==='KeyE'&&roomCode){e.preventDefault();leaveGame()}});setInterval(()=>{updateClock();checkCutoff()},250);
 setInterval(()=>{if(state?.phase==='draw'&&!state.isNarrator&&!submittedLocally&&dirty&&remaining()>0&&Date.now()-lastSaved>3000)saveDrawing()},3200);

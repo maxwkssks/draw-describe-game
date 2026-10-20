@@ -31,7 +31,7 @@ test('recovery removes only current round drawings, prior rounds remain',()=>{
 });
 test('client uses periodic heartbeat but no unload-only logic',()=>{
  assert.match(js,/async function pingPresence/);
- assert.match(js,/await pingPresence\(\)/);
+ assert.match(js,/pingPresence\(\)\.catch/);
  assert.match(js,/async function sync\(\)/);
  assert.doesNotMatch(js,/window\.onbeforeunload/);
 });

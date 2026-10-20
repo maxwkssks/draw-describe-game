@@ -11,3 +11,10 @@
 /* v5 endless mode */
 .option-group{grid-template-columns:repeat(4,minmax(0,1fr))}.option strong{font-size:15px}#unlimited-options[hidden]{display:none}@media(max-width:650px){.option-group{grid-template-columns:repeat(2,minmax(0,1fr))}}
 #unlimited-progress{margin-bottom:16px;border:1px solid #806dca;color:#eee3ff;background:#30254f;font-weight:700;text-align:center}
+
+/* Always-visible room exit for all game phases. Only visible while in a room. */
+#leave-global.leave-floating{position:fixed;right:max(18px,env(safe-area-inset-right));bottom:max(20px,env(safe-area-inset-bottom));z-index:50;display:flex;align-items:center;justify-content:center;gap:8px;min-height:50px;padding:12px 22px;font-size:15px;font-weight:900;border:2px solid #ff8799;background:#9a233f;color:#fff;box-shadow:0 8px 25px #05071880;border-radius:999px;}
+#leave-global.leave-floating:hover{background:#b62c4b;}
+#leave-global.leave-floating:focus-visible{outline:3px solid #fff;outline-offset:3px;}
+#leave-global.leave-floating[hidden]{display:none!important;}
+@media(max-width:650px){#leave-global.leave-floating{right:14px;bottom:max(14px,env(safe-area-inset-bottom));min-height:48px;padding:10px 18px;font-size:14px;}.app-shell:has(#leave-global:not([hidden])) .footer{padding-bottom:92px;}}
